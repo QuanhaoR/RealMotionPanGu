@@ -1,10 +1,10 @@
-tag: RealMotion_pangu
+tag: RealMotion_llama
 
 pl_module:
   _target_: realmotion.model.pl_modules.StreamLightningModule
   num_grad_frame: 3
   model:
-    _target_: realmotion.model.realmotion_pangu.RealMotion_pangu
+    _target_: realmotion.model.realmotion_llama.RealMotion_llama
     embed_dim: 128
     future_steps: 60
     encoder_depth: 4

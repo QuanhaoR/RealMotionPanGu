@@ -10,14 +10,11 @@ from .layers.multimodal_decoder import MultimodalDecoder
 from .layers.mtr_decoder import TransformerDecoder
 from .layers.transformer_blocks import Block, InteractionModule
 
-#import pangu transformer and config
-from .pangu import PanguEmbeddedModel 
-from .configuration_openpangu_dense import PanguEmbeddedConfig
-import json
-from pathlib import Path  
+#import llama transformer
+from .llama import LLaMATransformer
 
 
-class RealMotion_pangu_I(nn.Module):
+class RealMotion_llama_I(nn.Module):
     def __init__(
         self,
         embed_dim=128,
@@ -30,8 +27,8 @@ class RealMotion_pangu_I(nn.Module):
         use_transformer_decoder=False,
         num_decoder_layers=6,
         
-        #add pangu transformer configs
-        pangu_configs = None,
+        #add llama transformer configs
+        llama_configs = None,
     ) -> None:
         super().__init__()
         self.use_transformer_decoder = use_transformer_decoder
@@ -46,8 +43,7 @@ class RealMotion_pangu_I(nn.Module):
             nn.Linear(embed_dim, embed_dim),
         )
 
-        dpr = [x.item() for x in torch.linspace(0, drop_path, encoder_depth)]   
-        
+        dpr = [x.item() for x in torch.linspace(0, drop_path, encoder_depth)]
         self.blocks = nn.ModuleList(
             Block(
                 dim=embed_dim,
@@ -59,26 +55,18 @@ class RealMotion_pangu_I(nn.Module):
             for i in range(encoder_depth)
         )
         self.norm = nn.LayerNorm(embed_dim)
-        
-        #add pangu transformer and linear layers before and after it
-        self.pangu_dim_mapper1 = nn.Linear(embed_dim,1536,bias = False)
-        #default pangu configs
-        
-        if pangu_configs is None:
-            config_path = Path(__file__).parent / "pangu_config.json"
-            if config_path.exists():
-                with open(config_path, "r") as f:
-                    config_dict = json.load(f)
-                pangu_config = PanguEmbeddedConfig(**config_dict)
-            else:
-                raise FileNotFoundError(f"PanGu config file not found at {config_path}")        
-            
-        self.pangu = PanguEmbeddedModel(pangu_config)
-        for param in self.pangu.parameters():
-            param.requires_grad = False
-        self.pangu_dim_mapper2 = nn.Linear(1536,embed_dim,bias = False)
-        self.post_norm = nn.LayerNorm(embed_dim)
 
+        #add llama transformer and linear layers before and after it
+        self.llama_dim_mapper1 = nn.Linear(embed_dim,4096,bias = False)
+        #default llama configs
+        if llama_configs is None:
+            llama_configs = {"dim": 4096, "multiple_of": 256,"n_heads": 32, "n_layers": 32, "norm_eps": 1.0e-6,"vocab_size": -1, "first_layer": 31}
+        self.llama = LLaMATransformer(llama_configs)
+        for name, param in self.llama.named_parameters():
+            param.requires_grad = False
+        self.llama_dim_mapper2 = nn.Linear(4096,embed_dim,bias = False)
+        self.post_norm = nn.LayerNorm(embed_dim)
+        
         self.actor_type_embed = nn.Parameter(torch.Tensor(4, embed_dim))
         self.lane_type_embed = nn.Parameter(torch.Tensor(1, 1, embed_dim))
 
@@ -98,10 +86,10 @@ class RealMotion_pangu_I(nn.Module):
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
-    #skip initialize if pangu
+    #skip initialize if llama
         for name, module in self.named_modules():
             if module is m:
-                if 'pangu' in name:
+                if 'llama' in name:
                     return
                 break
     
@@ -114,9 +102,6 @@ class RealMotion_pangu_I(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def load_from_checkpoint(self, ckpt_path):
-    
-        #device = next(self.parameters()).device
-    
         ckpt = torch.load(ckpt_path, map_location='cpu')['state_dict']
         state_dict = {
             k[len('net.') :]: v for k, v in ckpt.items() if k.startswith('net.')
@@ -124,10 +109,6 @@ class RealMotion_pangu_I(nn.Module):
         return self.load_state_dict(state_dict=state_dict, strict=False)
 
     def forward(self, data):
-        device = next(self.parameters()).device
-        for key in data:
-            if torch.is_tensor(data[key]):
-                data[key] = data[key].to(device)
         hist_valid_mask = data['x_valid_mask']
         hist_key_valid_mask = data['x_key_valid_mask']
         hist_feat = torch.cat(
@@ -179,7 +160,7 @@ class RealMotion_pangu_I(nn.Module):
                                  lane_feat.new_zeros(*lane_feat.shape[:2])], dim=1).bool()
 
         x_encoder = x_encoder + pos_embed
-        if isinstance(self, RealMotion_pangu)  and self.use_stream_encoder:
+        if isinstance(self, RealMotion_llama) and self.use_stream_encoder:
             # read memory for stream process
             if 'memory_dict' in data and data['memory_dict'] is not None:
                 rel_pos = data['origin'] - data['memory_dict']['origin']
@@ -211,10 +192,10 @@ class RealMotion_pangu_I(nn.Module):
             x_encoder = blk(x_encoder, key_padding_mask=~key_valid_mask)
         x_encoder = self.norm(x_encoder)
         
-        #add pangu transformer in forward broadcasting)
-        x_encoder = self.pangu_dim_mapper1(x_encoder)
-        x_encoder = self.pangu(x_encoder,key_padding_mask=~key_valid_mask)
-        x_encoder = self.pangu_dim_mapper2(x_encoder)
+        #add llama transformer in forward broadcasting
+        x_encoder = self.llama_dim_mapper1(x_encoder)
+        x_encoder = self.llama(x_encoder,key_padding_mask=~key_valid_mask)
+        x_encoder = self.llama_dim_mapper2(x_encoder)
         x_encoder = self.post_norm(x_encoder)
 
         x_agent = x_encoder[:, 0]
@@ -230,7 +211,7 @@ class RealMotion_pangu_I(nn.Module):
         rot_mat[:, 1, 1] = cos
 
 
-        if isinstance(self, RealMotion_pangu) and self.use_stream_decoder:
+        if isinstance(self, RealMotion_llama)  and self.use_stream_decoder:
             # traj interaction
             if 'memory_dict' in data and data['memory_dict'] is not None:
                 memory_y_hat = data['memory_dict']['glo_y_hat']
@@ -257,7 +238,7 @@ class RealMotion_pangu_I(nn.Module):
         glo_y_hat = torch.bmm(y_hat.detach().reshape(B, -1, 2), torch.inverse(rot_mat))
         glo_y_hat = glo_y_hat.reshape(B, y_hat.size(1), -1, 2)
 
-        if isinstance(self, RealMotion_pangu):
+        if isinstance(self, RealMotion_llama):
             memory_dict = {
                 'x_encoder': x_encoder,
                 'x_mode': x_mode,
@@ -272,7 +253,7 @@ class RealMotion_pangu_I(nn.Module):
 
         return ret_dict
 
-class RealMotion_pangu(RealMotion_pangu_I):
+class RealMotion_llama(RealMotion_llama_I):
     def __init__(self, 
                  use_stream_encoder=True,
                  use_stream_decoder=True,
@@ -313,4 +294,4 @@ class RealMotion_pangu(RealMotion_pangu_I):
                 nn.Linear(kwargs['embed_dim'], kwargs['embed_dim']),
             )
             
-
+        

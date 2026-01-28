@@ -84,6 +84,12 @@ def main(cfg):
             print(f"model attributes: {[attr for attr in dir(model.model) if not attr.startswith('_')]}")
     
     #logger.info(model)
+    device = torch.device(f"npu:{torch.npu.current_device()}")
+    model = model.to(device)
+    print('\n'+'-'*50)
+    print(f'model device:{model.device}')
+    print('\n'+'-'*50)
+    print(model)
 
     callbacks = instantiate(cfg.callbacks)
     
@@ -102,6 +108,7 @@ def main(cfg):
         callbacks=callbacks,
         **trainer_config
     )
+
 
     trainer.fit(model, datamodule=datamodule, ckpt_path=cfg.checkpoint)
     trainer.validate(model, datamodule.val_dataloader())

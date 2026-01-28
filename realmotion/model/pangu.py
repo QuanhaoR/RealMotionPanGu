@@ -442,40 +442,40 @@ class PanguEmbeddedModel(PanguEmbeddedPreTrainedModel):
         
      #-------------------------------------------------------------------                begin             ------------------------------------------------------------   
     def custom_load_state_dict(self, checkpoint,strict=False, layer_offset=0):
-          print(f"Loading tail layers: {self.assign_layer_idx}")
-          i = self.assign_layer_idx
-          layer_checkpoint_keys = []
-          for k in checkpoint.keys():
-              if f'layers.{i}.' in k:
-                  layer_checkpoint_keys.append(k)
-          print(f"DEBUG: Found {len(layer_checkpoint_keys)} keys for layer {i}")
-          
-          if not layer_checkpoint_keys:
-              print(f"Warning: No weights found for layer {i}")
+          for i,idx in enumerate(self.assign_layer_idx):
+              print(f"Loading pangu layers: {idx}")
+              layer_checkpoint_keys = []
+              for k in checkpoint.keys():
+                  if f'model.layers.{idx}.' in k:
+                      layer_checkpoint_keys.append(k)
+              print(f"DEBUG: Found {len(layer_checkpoint_keys)} keys for pangu layer {idx}")
               
-          sample_keys = list(checkpoint.keys())[:5]
-          print('-'*100)
-          print(f"Sample checkpoint keys: {sample_keys}")    
-          layer_checkpoint = {}
-          for k in layer_checkpoint_keys:
-              new_key = k.replace(f'model.layers.{i}.', '')
-              layer_checkpoint[new_key] = checkpoint[k]
-          
-          sample_keys = list(layer_checkpoint.keys())[:5]
-          print(f"Sample layer_checkpoint keys: {sample_keys}")
-          
-          if i < self.config.num_hidden_layers:
-              load_result = self.layers[0].load_state_dict(layer_checkpoint, strict=False)
-        
-              if len(load_result.missing_keys) == 0 and len(load_result.unexpected_keys) == 0:
-                  print(f"successfully load no.{i} weight")
+              if not layer_checkpoint_keys:
+                  print(f"Warning: No weights found for pangu layer {idx}")
+                  
+              sample_keys = list(checkpoint.keys())[:5]
+              print('-'*100)
+              print(f"Sample checkpoint keys: {sample_keys}")    
+              layer_checkpoint = {}
+              for k in layer_checkpoint_keys:
+                  new_key = k.replace(f'model.layers.{idx}.', '')
+                  layer_checkpoint[new_key] = checkpoint[k]
+              
+              sample_keys = list(layer_checkpoint.keys())[:5]
+              print(f"Sample layer_checkpoint keys: {sample_keys}")
+              
+              if idx < self.config.num_hidden_layers:
+                  load_result = self.layers[i].load_state_dict(layer_checkpoint, strict=False)
+            
+                  if len(load_result.missing_keys) == 0 and len(load_result.unexpected_keys) == 0:
+                      print(f"successfully load pangu no.{idx} weight")
+                  else:
+                      print(f"no.{idx}loading problem - missing: {load_result.missing_keys}, unexpected: {load_result.unexpected_keys}")
+                  #self.layers[0].load_state_dict(
+                  #    layer_checkpoint, strict=strict)
+                  #print(f"Loaded layer {i}")
               else:
-                  print(f"no.{i}loading problem - missing: {load_result.missing_keys}, unexpected: {load_result.unexpected_keys}")
-              #self.layers[0].load_state_dict(
-              #    layer_checkpoint, strict=strict)
-              #print(f"Loaded layer {i}")
-          else:
-              print(f"Warning: Layer index {i} out of range")
+                  print(f"Warning: Layer index {i} out of range")
      #--------------------------------------------------------------------              end             -------------------------------------------------------------------               
 #------------------------------------------------------------------------               begin           -------------------------------------------------------------------   
     @can_return_tuple
